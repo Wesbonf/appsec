@@ -1,6 +1,6 @@
 # Versão do NodeJS
 
-- Nesse projeto estamos usando a versão **16.0.0** do NodeJS.
+- Nesse projeto estamos usando a versão **16.0.0** do NodeJS.  dada
 
 # Iniciando o projeto
 
