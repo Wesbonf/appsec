@@ -20,53 +20,48 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Pull TruffleHog image
-        run: docker pull trufflesecurity/trufflehog:latest
-
       - name: Run TruffleHog (JSON output)
-        id: trufflehog
         run: |
           docker run --rm \
             -v "$PWD":/pwd \
             trufflesecurity/trufflehog:latest github \
-            --repo https://github.com/Wesbonf/appsec \
-            --json \
-            > trufflehog-results.json
+            --repo https://github.com/${{ github.repository }} \
+            --json > trufflehog-results.json
 
-          echo "results<<EOF" >> $GITHUB_OUTPUT
-          cat trufflehog-results.json >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Check secrets and create issue
+      - name: Process results and create issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RESULTS: ${{ steps.trufflehog.outputs.results }}
         run: |
-          echo "$RESULTS" | jq '.' > results.json
-
-          if jq -e '. | length > 0' results.json > /dev/null; then
+          if jq -e 'length > 0' trufflehog-results.json > /dev/null; then
             echo "::error::TruffleHog encontrou segredos no repositório."
 
-            # Verifica se já existe issue aberta
-            EXISTING_ISSUE=$(curl -s \
+            SUMMARY=$(jq -r '
+              .[] |
+              "🔴 Tipo: \(.DetectorName)\n" +
+              "📁 Arquivo: \(.SourceMetadata.Data.Github.file)\n" +
+              "📍 Linha: \(.SourceMetadata.Data.Github.line)\n" +
+              "🔑 Commit: \(.SourceMetadata.Data.Github.commit)\n" +
+              "👤 Autor: \(.SourceMetadata.Data.Github.email)\n" +
+              "🔗 Link: \(.SourceMetadata.Data.Github.link)\n"
+            ' trufflehog-results.json)
+
+            curl -s -X POST \
               -H "Authorization: Bearer $GITHUB_TOKEN" \
               -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/${{ github.repository }}/issues?state=open&labels=security" \
-              | jq '.[] | select(.title=="TruffleHog found secrets") | .number')
-
-            if [ -z "$EXISTING_ISSUE" ]; then
-              curl -s -X POST \
-                -H "Authorization: Bearer $GITHUB_TOKEN" \
-                -H "Accept: application/vnd.github+json" \
-                https://api.github.com/repos/${{ github.repository }}/issues \
-                -d "$(jq -n --arg body "$(jq '.' results.json)" '{
-                  title: "TruffleHog found secrets",
-                  body: ("Secrets detectados automaticamente pelo TruffleHog:\n\n```json\n" + $body + "\n```"),
-                  labels: ["security", "bug"]
-                }')"
-            else
-              echo "Issue já existente: #$EXISTING_ISSUE"
-            fi
+              https://api.github.com/repos/${{ github.repository }}/issues \
+              -d "$(jq -n --arg body "$SUMMARY" '{
+                title: "🚨 TruffleHog detectou segredos no repositório",
+                body: (
+                  "Foram detectados segredos sensíveis no repositório.\n\n" +
+                  "### Detalhes encontrados:\n\n" +
+                  $body +
+                  "\n### Ações recomendadas:\n" +
+                  "- Remover o segredo do repositório\n" +
+                  "- Rotacionar imediatamente a credencial\n" +
+                  "- Validar histórico de commits\n"
+                ),
+                labels: ["security", "secret", "trufflehog"]
+              }')"
 
             exit 1
           else
