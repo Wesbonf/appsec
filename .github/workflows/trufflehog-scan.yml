@@ -10,11 +10,18 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      with:             
-        fetch-depth: 0    
-    - name: Secret Scanning
-      uses: trufflesecurity/trufflehog@main
-      with:
-        extra_args: --results=verified,unknown
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set Up Trufflehog
+        run: docker pull trufflesecurity/trufflehog:latest
+
+      - name: Run Trufflehog Scan
+        run: |
+          docker run --rm -v $PWD:/pwd trufflesecurity/trufflehog:latest github --repo https://github.com/Wesbonf/appsec --exclude-paths=/pwd/trufflehog-exclude-path.txt
+
+
+
+    
