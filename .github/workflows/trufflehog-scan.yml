@@ -34,10 +34,6 @@ jobs:
           # Verifica se o arquivo não está vazio (tem secrets)
           if [ -s trufflehog-results.json ]; then
             echo "::error::TruffleHog encontrou segredos no repositório."
-
-            # AQUI ESTÁ A CORREÇÃO PRINCIPAL:
-            # 1. jq -s (slurp): Lê todas as linhas e cria um array gigante
-            # 2. Ajuste nos caminhos: Usando .SourceMetadata.Data.Git (padrão do scan local)
             SUMMARY=$(jq -r -s '
               .[] |
               "🔴 **Tipo:** " + (.DetectorName // "N/A") + "\n" +
@@ -49,8 +45,6 @@ jobs:
               "----------------------------------------\n"
             ' trufflehog-results.json)
 
-            # Prepara o corpo do issue com escape correto
-            # Usamos --arg para passar o SUMMARY com segurança para dentro do JSON
             BODY_JSON=$(jq -n --arg body "$SUMMARY" '{
                 title: "🚨 TruffleHog detectou segredos no repositório",
                 body: (
