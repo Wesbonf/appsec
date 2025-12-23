@@ -24,47 +24,54 @@ jobs:
         run: |
           docker run --rm \
             -v "$PWD":/pwd \
-            trufflesecurity/trufflehog:latest github \
-            --repo https://github.com/${{ github.repository }} \
+            trufflesecurity/trufflehog:latest git file:///pwd \
             --json > trufflehog-results.json
 
       - name: Process results and create issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Verifica se existe ao menos 1 finding
-          if jq -e 'length > 0' trufflehog-results.json > /dev/null; then
+          # Verifica se o arquivo não está vazio (tem secrets)
+          if [ -s trufflehog-results.json ]; then
             echo "::error::TruffleHog encontrou segredos no repositório."
 
-            SUMMARY=$(jq -r '
+            # AQUI ESTÁ A CORREÇÃO PRINCIPAL:
+            # 1. jq -s (slurp): Lê todas as linhas e cria um array gigante
+            # 2. Ajuste nos caminhos: Usando .SourceMetadata.Data.Git (padrão do scan local)
+            SUMMARY=$(jq -r -s '
               .[] |
-              "🔴 Tipo: " + .DetectorName + "\n" +
-              "📁 Arquivo: " + .SourceMetadata.Data.Github.file + "\n" +
-              "📍 Linha: " + (.SourceMetadata.Data.Github.line | tostring) + "\n" +
-              "🔑 Commit: " + .SourceMetadata.Data.Github.commit + "\n" +
-              "👤 Autor: " + .SourceMetadata.Data.Github.email + "\n" +
-              "🔗 Link: " + .SourceMetadata.Data.Github.link + "\n\n"
+              "🔴 **Tipo:** " + (.DetectorName // "N/A") + "\n" +
+              "📁 **Arquivo:** " + (.SourceMetadata.Data.Git.file // "N/A") + "\n" +
+              "📍 **Linha:** " + ((.SourceMetadata.Data.Git.line // 0) | tostring) + "\n" +
+              "🔑 **Commit:** " + (.SourceMetadata.Data.Git.commit // "N/A") + "\n" +
+              "👤 **Autor:** " + (.SourceMetadata.Data.Git.email // "N/A") + "\n" +
+              "📝 **Hash:** " + (.SourceMetadata.Data.Git.file_hash // "N/A") + "\n" +
+              "----------------------------------------\n"
             ' trufflehog-results.json)
+
+            # Prepara o corpo do issue com escape correto
+            # Usamos --arg para passar o SUMMARY com segurança para dentro do JSON
+            BODY_JSON=$(jq -n --arg body "$SUMMARY" '{
+                title: "🚨 TruffleHog detectou segredos no repositório",
+                body: (
+                  "Foram detectados segredos sensíveis no código. Por favor, revogue as credenciais imediatamente.\n\n" +
+                  "### Detalhes encontrados:\n\n" +
+                  $body +
+                  "\n### Ações recomendadas:\n" +
+                  "- 🚫 **Não faça commit** de correções apenas removendo o texto (o histórico mantém o segredo).\n" +
+                  "- 🔄 **Rotacione** (altere) a senha/chave imediatamente.\n" +
+                  "- 🧹 Utilize ferramentas como `git-filter-repo` ou `BFG` para limpar o histórico se necessário."
+                ),
+                labels: ["security", "secret", "trufflehog"]
+            }')
 
             curl -s -X POST \
               -H "Authorization: Bearer $GITHUB_TOKEN" \
               -H "Accept: application/vnd.github+json" \
               https://api.github.com/repos/${{ github.repository }}/issues \
-              -d "$(jq -n --arg body "$SUMMARY" '{
-                title: "🚨 TruffleHog detectou segredos no repositório",
-                body: (
-                  "Foram detectados segredos sensíveis no repositório.\n\n" +
-                  "### Detalhes encontrados:\n\n" +
-                  $body +
-                  "### Ações recomendadas:\n" +
-                  "- Remover o segredo do repositório\n" +
-                  "- Rotacionar imediatamente a credencial\n" +
-                  "- Revisar histórico de commits\n"
-                ),
-                labels: ["security", "secret", "trufflehog"]
-              }')"
+              -d "$BODY_JSON"
 
             exit 1
           else
-            echo "Nenhum segredo encontrado."
+            echo "✅ Nenhum segredo encontrado."
           fi
