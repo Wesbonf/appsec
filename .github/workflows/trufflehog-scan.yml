@@ -33,16 +33,17 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Verifica se existe ao menos 1 finding
-          if jq -e '.' trufflehog-results.json > /dev/null; then
+          if jq -e 'length > 0' trufflehog-results.json > /dev/null; then
             echo "::error::TruffleHog encontrou segredos no repositório."
 
             SUMMARY=$(jq -r '
-              "🔴 Tipo: \.DetectorName)\n" +
-              "📁 Arquivo: \.SourceMetadata.Data.Github.file)\n" +
-              "📍 Linha: \.SourceMetadata.Data.Github.line)\n" +
-              "🔑 Commit: \.SourceMetadata.Data.Github.commit)\n" +
-              "👤 Autor: \.SourceMetadata.Data.Github.email)\n" +
-              "🔗 Link: \.SourceMetadata.Data.Github.link)\n\n"
+              .[] |
+              "🔴 Tipo: " + .DetectorName + "\n" +
+              "📁 Arquivo: " + .SourceMetadata.Data.Github.file + "\n" +
+              "📍 Linha: " + (.SourceMetadata.Data.Github.line | tostring) + "\n" +
+              "🔑 Commit: " + .SourceMetadata.Data.Github.commit + "\n" +
+              "👤 Autor: " + .SourceMetadata.Data.Github.email + "\n" +
+              "🔗 Link: " + .SourceMetadata.Data.Github.link + "\n\n"
             ' trufflehog-results.json)
 
             curl -s -X POST \
