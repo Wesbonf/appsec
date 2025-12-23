@@ -28,42 +28,42 @@ jobs:
             --repo https://github.com/${{ github.repository }} \
             --json > trufflehog-results.json
 
-      - name: Process results and create issue
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if jq -e 'length > 0' trufflehog-results.json > /dev/null; then
-            echo "::error::TruffleHog encontrou segredos no repositório."
+  - name: Process results and create issue
+  env:
+    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  run: |
+    # Verifica se existe ao menos 1 finding
+    if jq -e '.' trufflehog-results.json > /dev/null; then
+      echo "::error::TruffleHog encontrou segredos no repositório."
 
-            SUMMARY=$(jq -r '
-              .[] |
-              "🔴 Tipo: \(.DetectorName)\n" +
-              "📁 Arquivo: \(.SourceMetadata.Data.Github.file)\n" +
-              "📍 Linha: \(.SourceMetadata.Data.Github.line)\n" +
-              "🔑 Commit: \(.SourceMetadata.Data.Github.commit)\n" +
-              "👤 Autor: \(.SourceMetadata.Data.Github.email)\n" +
-              "🔗 Link: \(.SourceMetadata.Data.Github.link)\n"
-            ' trufflehog-results.json)
+      SUMMARY=$(jq -r '
+        "🔴 Tipo: \(.DetectorName)\n" +
+        "📁 Arquivo: \(.SourceMetadata.Data.Github.file)\n" +
+        "📍 Linha: \(.SourceMetadata.Data.Github.line)\n" +
+        "🔑 Commit: \(.SourceMetadata.Data.Github.commit)\n" +
+        "👤 Autor: \(.SourceMetadata.Data.Github.email)\n" +
+        "🔗 Link: \(.SourceMetadata.Data.Github.link)\n\n"
+      ' trufflehog-results.json)
 
-            curl -s -X POST \
-              -H "Authorization: Bearer $GITHUB_TOKEN" \
-              -H "Accept: application/vnd.github+json" \
-              https://api.github.com/repos/${{ github.repository }}/issues \
-              -d "$(jq -n --arg body "$SUMMARY" '{
-                title: "🚨 TruffleHog detectou segredos no repositório",
-                body: (
-                  "Foram detectados segredos sensíveis no repositório.\n\n" +
-                  "### Detalhes encontrados:\n\n" +
-                  $body +
-                  "\n### Ações recomendadas:\n" +
-                  "- Remover o segredo do repositório\n" +
-                  "- Rotacionar imediatamente a credencial\n" +
-                  "- Validar histórico de commits\n"
-                ),
-                labels: ["security", "secret", "trufflehog"]
-              }')"
+      curl -s -X POST \
+        -H "Authorization: Bearer $GITHUB_TOKEN" \
+        -H "Accept: application/vnd.github+json" \
+        https://api.github.com/repos/${{ github.repository }}/issues \
+        -d "$(jq -n --arg body "$SUMMARY" '{
+          title: "🚨 TruffleHog detectou segredos no repositório",
+          body: (
+            "Foram detectados segredos sensíveis no repositório.\n\n" +
+            "### Detalhes encontrados:\n\n" +
+            $body +
+            "### Ações recomendadas:\n" +
+            "- Remover o segredo do repositório\n" +
+            "- Rotacionar imediatamente a credencial\n" +
+            "- Revisar histórico de commits\n"
+          ),
+          labels: ["security", "secret", "trufflehog"]
+        }')"
 
-            exit 1
-          else
-            echo "Nenhum segredo encontrado."
-          fi
+      exit 1
+    else
+      echo "Nenhum segredo encontrado."
+    fi
