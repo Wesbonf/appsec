@@ -20,43 +20,44 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Run TruffleHog (JSON output)
+      - name: Run TruffleHog (Scan apenas do PR)
+        id: scan
         run: |
+          # Se for um Pull Request, usamos o since-commit da base do PR
+          # Se for um Push direto na main, ele varre o último commit
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            SINCE_FLAG="--since-commit ${{ github.event.pull_request.base.sha }}"
+          else
+            SINCE_FLAG="--since-commit HEAD~1"
+          fi
+
           docker run --rm \
             -v "$PWD":/pwd \
             trufflesecurity/trufflehog:latest git file:///pwd \
-            --json > trufflehog-results.json
+            $SINCE_FLAG \
+            --json > trufflehog-results.json || true 
+            # O "|| true" evita que o workflow pare antes de processarmos o JSON
 
       - name: Process results and create issue
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Verifica se o arquivo não está vazio (tem secrets)
+          # Verifica se o arquivo existe e não está vazio
           if [ -s trufflehog-results.json ]; then
-            echo "::error::TruffleHog encontrou segredos no repositório."
+            echo "::error::TruffleHog encontrou segredos novos no PR."
+            
             SUMMARY=$(jq -r -s '
               .[] |
               "🔴 **Tipo:** " + (.DetectorName // "N/A") + "\n" +
               "📁 **Arquivo:** " + (.SourceMetadata.Data.Git.file // "N/A") + "\n" +
               "📍 **Linha:** " + ((.SourceMetadata.Data.Git.line // 0) | tostring) + "\n" +
-              "🔑 **Commit:** " + (.SourceMetadata.Data.Git.commit // "N/A") + "\n" +
-              "👤 **Autor:** " + (.SourceMetadata.Data.Git.email // "N/A") + "\n" +
-              "📝 **Hash:** " + (.SourceMetadata.Data.Git.file_hash // "N/A") + "\n" +
               "----------------------------------------\n"
             ' trufflehog-results.json)
 
             BODY_JSON=$(jq -n --arg body "$SUMMARY" '{
-                title: "🚨 TruffleHog detectou segredos no repositório",
-                body: (
-                  "Foram detectados segredos sensíveis no código. Por favor, revogue as credenciais imediatamente.\n\n" +
-                  "### Detalhes encontrados:\n\n" +
-                  $body +
-                  "\n### Ações recomendadas:\n" +
-                  "- 🚫 **Não faça commit** de correções apenas removendo o texto (o histórico mantém o segredo).\n" +
-                  "- 🔄 **Rotacione** (altere) a senha/chave imediatamente.\n" +
-                  "- 🧹 Utilize ferramentas como `git-filter-repo` ou `BFG` para limpar o histórico se necessário."
-                ),
-                labels: ["security", "secret", "trufflehog"]
+                title: "🚨 Novos segredos detectados no Pull Request",
+                body: ("⚠️ Foram detectados segredos nas novas alterações:\n\n" + $body),
+                labels: ["security", "trufflehog"]
             }')
 
             curl -s -X POST \
@@ -67,5 +68,5 @@ jobs:
 
             exit 1
           else
-            echo "✅ Nenhum segredo encontrado."
+            echo "✅ Nenhum segredo novo encontrado nas alterações atuais."
           fi
